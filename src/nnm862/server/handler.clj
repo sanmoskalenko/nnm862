@@ -35,7 +35,7 @@
  (try
    (http/get url {:query-params params})
    (catch Exception e
-     (r/as-error (ex-message e)))))
+     (r/as-error (ex-message e) 500))))
 
 
 
@@ -60,9 +60,13 @@
         response (send-request url params)]
     (if (= 200 (:status response))
       (:has_more (json/read-value (:body response) decode))
-      (r/as-error {tag
-                   (format "Ошибка %s при выполнении запроса к API StackOverflow endpoint `/tag` с тегом %s"
-                          (or (:status response) (r/get-data response)) tag)}))))
+      (let [error-status (or (:status response) (r/get-meta response))]
+        (r/as-error
+         {tag
+          {:description (format "Error %s when making a request to the StackOverflow API endpoint `/tags` with tag %s"
+                                error-status tag)
+           :message (or (r/get-data response) "Internal server error")
+           :status error-status}})))))
 
 
 (defn- search-for-tag
@@ -87,9 +91,12 @@
         response (send-request url params)]
     (if (= 200 (:status response))
       (json/read-value (:body response) decode)
-      (r/as-error {tag
-                   (format "Ошибка %s при выполнении запроса к API StackOverflow endpoint `/search` с тегом %s"
-                          (or (:status response) (r/get-data response)) tag)}))))
+      (let [error-status (or (:status response) (r/get-meta response))]
+        (r/as-error {tag
+                     {:description (format "Error %s when making a request to the StackOverflow API endpoint `/search` with tag %s"
+                                           error-status tag)
+                      :message (or (r/get-data response) "Internal server error")
+                      :status error-status}})))))
 
 
 (defn- calculate-total-answ
@@ -118,9 +125,9 @@
                           1)
                   answer-count (if has-answer
                                  (if (contains? inner-acc :answered-tags)
-                                   (-> :answered-tags inner-acc inc)
+                                   (-> :answered-tags inner-acc inc) 
                                    1)
-                                 (inner-acc :answered-tags))]
+                                 (:answered-tags inner-acc))]
               (assoc-in inner-acc [tag]
                         {:total count
                          :answered answer-count})))
@@ -145,6 +152,12 @@
   "Обрабатывает результаты поиска для каждого
    тега и вычисляет суммарную статистику по всем тегам.
 
+   *Обратите внимание: если проверка на существование тега отключена,
+   то запрос на поиск ответов будет выполняться всегда, не зависимо от того
+   существует ли тег в действительности или нет. Если проверка отключена, то
+   поиск выполняться не будет.* ***По-умолчанию отключено!***
+
+
    Параметры:
     * `tag` – имя тега, переданного в запросе."
   [tag]
@@ -154,9 +167,11 @@
                           true)
         data (if tag-exists?
                (search-for-tag tag)
-               (r/as-error "Запрос содержит несуществующий в API StackOverflow тег"))
+               (r/as-error {tag {:message "Not found"
+                                 :description "The request contains a tag that does not exist in the StackOverflow API"
+                                 :status 404}}))
         tag-stats (if (r/error? data)
-                    (r/get-data data)
+                    data
                     (reduce (fn [acc question]
                               (let [tags (:tags question)
                                     has-answer (:is_answered question)
@@ -170,26 +185,21 @@
   "Обрабатывает все переданные теги, выполняя поиск вопросов и вычисляя
    общую статистику.
 
-   Обратите внимание: если проверка на существование тега отключена,
-   то запрос на поиск ответов будет выполняться всегда, не зависимо от того
-   существует ли тег в действительности или нет. Если проверка включена, то
-   Поиск выполняться не будет. По-умолчанию отключено!
-
    Параметры:
     * `tags` – вектор тегов, переданных в запросе."
   [tags]
-  (let [cfg                 (-> ctx :service)
-        buffer-size         (:buffer-size cfg)
-        count-tags          (count tags)
-        count-buffers       (min buffer-size count-tags)
-        ch                  (async/chan count-buffers)]
+  (let [cfg (:service ctx)
+        buffer-size (:buffer-size cfg)
+        count-tags (count tags)
+        count-buffers (min buffer-size count-tags)
+        ch (async/chan count-buffers)]
     (doseq [tag tags]
       (async/go
         (async/>! ch (process-tag tag))))
     (repeatedly count-buffers #(when-let [result (async/<!! ch)]
                                  (if (r/error? result)
                                    (r/get-data result)
-                                   (into {} result))))))
+                                   result)))))
 
 
 (defn search-handler
@@ -199,14 +209,15 @@
    Параметры:
     * `req` – необработанный запрос."
   [req]
-  (let [tags      (-> req :params :tag)
-        tag-stats (cond-> tags
-                          (vector? tags) process-all-tags
-                          (string? tags) process-tag
-                          (nil? tags) (str "Параметры поиска заданы некорректно!"))]
+  (let [tags (-> req :params :tag)
+        tag-stats (cond
+                    (vector? tags) (process-all-tags tags)
+                    (string? tags) (process-tag tags)
+                    (nil? tags) (r/as-error {:message "Bad request"
+                                             :description "Search parameters are set incorrectly!"}
+                                            400))]
     (json/write-value-as-string
       {:headers {:Content-Type "application/json"}
-       :body    tag-stats
-       :status  200}
+       :body    (or (r/get-data tag-stats) tag-stats)
+       :status  (or (r/get-meta tag-stats) 200)}
       encode)))
-

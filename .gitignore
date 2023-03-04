@@ -10,4 +10,10 @@ pom.xml.asc
 /.nrepl-port
 /.prepl-port
 .hgignore
+.calva/
+.idea/
+log
+.clj-kondo/.cache
+.clj-kondo/.babashka
+nnm862.iml
 .hg/

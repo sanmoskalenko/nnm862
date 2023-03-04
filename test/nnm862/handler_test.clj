@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [nnm862.server.handler :as sut]
+    [clj-http.client :as http]
     [unifier.response :as r]
     [nnm862.server.config :as config]
     [clojure.core.async :as async]))
@@ -18,10 +19,11 @@
 
   (testing "Функция корректно обрабатывает ошибки,
             при обращении к API StackOverflow."
-    (with-redefs [sut/send-request (constantly {:status 404
-                                                :body   "{\"has_more\": true}"})]
-      (let [expected {"clojure" "Ошибка 404 при выполнении запроса к API StackOverflow endpoint `/tag` с тегом clojure"}
-            result   (r/get-data (#'sut/exists-tag? "clojure"))]
+    (with-redefs [http/get (fn [_ _] (throw (Exception.)))]
+      (let [expected {"clojure" {:description "Error 500 when making a request to the StackOverflow API endpoint `/tags` with tag clojure"
+                                 :message "Internal server error"
+                                 :status 500}}
+            result (r/get-data (#'sut/exists-tag? "clojure"))]
         (is (= expected result)))))
 
   (testing "Функция корректно возвращает значение, если тег не найден,
@@ -44,10 +46,11 @@
 
   (testing "Функция корректно обрабатывает ошибки,
             при обращении к API StackOverflow."
-    (with-redefs [sut/send-request (constantly {:status 404
-                                                :body   "{\"clojure\": \"some-value\"}"})]
-      (let [expected {"clojure" "Ошибка 404 при выполнении запроса к API StackOverflow endpoint `/search` с тегом clojure"}
-            result   (r/get-data (#'sut/search-for-tag "clojure"))]
+    (with-redefs [http/get (fn [_ _] (throw (Exception.)))]
+      (let [expected  {"clojure" {:description "Error 500 when making a request to the StackOverflow API endpoint `/search` with tag clojure"
+                                  :message "Internal server error"
+                                  :status 500}}
+            result (r/get-data (#'sut/search-for-tag "clojure"))]
         (is (= expected result))))))
 
 
@@ -102,18 +105,18 @@
                                                            :tags ["ruby" "clojure"]}
                                                           {:is_answered false
                                                            :tags ["clojure"]}]})]
-    (let [sample-tag "clojure"
-          expected {"clojure" {:answered 1 :total 2}
+    (let [expected {"clojure" {:answered 1 :total 2}
                     "ruby" {:answered 1 :total 1}}
-          result (#'sut/process-tag sample-tag)]
+          result (#'sut/process-tag "clojure")]
       (is (= expected result)))))
 
   (testing "В случае получение ответа отличного от 200 от API StackOverflow
-            возвращается корректный резульат"
-    (with-redefs [sut/send-request (constantly {:status 404})]
-      (let [sample-tag "clojure"
-            expected {"clojure" "Ошибка 404 при выполнении запроса к API StackOverflow endpoint `/search` с тегом clojure"}
-            result (r/get-data (#'sut/process-tag sample-tag))]
+            возвращается корректный результат"
+    (with-redefs [http/get (fn [_ _] (throw (Exception.)))]
+      (let [expected {"clojure" {:description "Error 500 when making a request to the StackOverflow API endpoint `/search` with tag clojure"
+                                 :message "Internal server error"
+                                 :status 500}}
+            result (r/get-data (#'sut/process-tag "clojure"))]
         (is (= expected result)))))
 
   (testing "В случае, если включена проверка на наличие тега в базе
@@ -122,8 +125,10 @@
     (with-redefs [config/ctx {:service {:tag-checker-on true}}
                   sut/send-request (constantly {:status 200
                                                 :body   "{\"has_more\": false}"})]
-      (let [expected "Запрос содержит несуществующий в API StackOverflow тег"
-            result (#'sut/process-tag "clojure")]
+      (let [expected {"clojure" {:description "The request contains a tag that does not exist in the StackOverflow API"
+                                 :message "Not found"
+                                 :status 404}}
+            result (r/get-data (#'sut/process-tag "clojure"))]
         (is (= expected result))))))
 
 
@@ -167,8 +172,8 @@
             result (sut/search-handler {:params {:tag "clojure"}})]
         (is (= expected result)))))
 
-  (testing "Если передан некорректный запрос, то возвращается корректная ошибка."
-      (let [expected "{\n  \"headers\" : {\n    \"Content-Type\" : \"application/json\"\n  },\n  \"body\" : \"Параметры поиска заданы некорректно!\",\n  \"status\" : 200\n}"
+  (testing "Если передан некорректный запрос, то возвращается корректная ошибка с правильным статусом."
+      (let [expected "{\n  \"headers\" : {\n    \"Content-Type\" : \"application/json\"\n  },\n  \"body\" : {\n    \"message\" : \"Bad request\",\n    \"description\" : \"Search parameters are set incorrectly!\"\n  },\n  \"status\" : 400\n}"
             result (sut/search-handler {:params {:not-tag "incorrect-request"}})]
         (is (= expected result))))
 

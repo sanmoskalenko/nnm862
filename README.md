@@ -148,6 +148,7 @@
 
 ## Пример возвращаемого результата
 
+* Если запрос сформирован корректно: 
 ```json
 {
   "headers" : {
@@ -175,7 +176,22 @@
 }%
 ```
 
-Copyright © 2023 sanmosakalenko
+* Если запрос сформирован с ошибкой: 
+```json
+{
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "message" : "Bad request",
+    "description" : "Search parameters are set incorrectly!"
+  },
+  "status" : 400
+}%
+```
+
+
+Copyright © 2023 sanmoskalenko
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
