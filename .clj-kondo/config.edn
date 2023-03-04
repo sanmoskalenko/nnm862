@@ -1,0 +1,2 @@
+{:lint-as {mount.core/defstate    clojure.core/def
+           cambium.core/deflevel  clojure.core/def}}

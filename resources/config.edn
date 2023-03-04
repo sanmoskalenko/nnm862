@@ -1,0 +1,19 @@
+{:web {:port              #long #or [#env WEBSERVER_PORT 8080]
+       :join?             false
+       :http?             true
+       :max-idle-time     200000
+       :ssl?              false
+       :max-threads       10
+       :min-threads       1
+       :send-date-header? true
+       :async?            true}
+
+ :service {:buffer-size    #long #or [#env BUFFER_SIZE 10]
+           :search-url     #or [#env SEARCH_URL "https://api.stackexchange.com/2.3/search"]
+           :search-tag-url #or [#env SEARCH_TAG_URL "https://api.stackexchange.com/2.3/tags"]
+           ;; orders может принимать значения "asc"/"desc"
+           :orders         #or [#env ORDERS "desc"]
+           :page-limit     #long #or [#env PAGE_LIMIT 100]
+           :tag-checker-on #boolean #or [#env TAG_CHECKER_ON false]
+           ;; sort-by может принимать значения: "activity"/"votes"/"creation"/"relevance"
+           :sort-by        #or [#env SORT_BY "creation"]}}
