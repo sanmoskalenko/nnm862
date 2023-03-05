@@ -12,8 +12,7 @@
              JSON сообщения в EDN формат."
        :private true}
   decode
-  (json/object-mapper {:decode-key-fn true
-                       :pretty true}))
+  (json/object-mapper {:decode-key-fn true}))
 
 
 (def ^{:doc "JSON энкодер. Необходим для кодирования
@@ -36,7 +35,6 @@
    (http/get url {:query-params params})
    (catch Exception e
      (r/as-error (ex-message e) 500))))
-
 
 
 (defn- exists-tag?
@@ -99,53 +97,27 @@
                       :status error-status}})))))
 
 
-(defn- calculate-total-answ
-  "Рассчитывает общее кол-во ответов по всем тегами.
-
-   Параметры:
-    * `collected-stats` – `map` со статистикой по всем вопросам и тегам."
-  [collected-stats]
-  (reduce + (filter number?
-                    (map (fn [[_subtag stats]]
-                           (:answered stats))
-                         collected-stats))))
-
-
-(defn- collect-stats
-  "Собирает статистику по тегам.
+(defn- aggregate-stats
+  "Агрегирует статистику по тегам.
 
    Параметры:
     * `acc` – аккумулятор;
-    * `tags` – субтеги по запросу;
+    * `tags` – теги по вопросам;
     * `has-answer` – наличие ответа на вопрос (булевое значение)."
   [acc tags has-answer]
   (reduce (fn [inner-acc tag]
             (let [count (if (contains? inner-acc tag)
-                          (-> tag inner-acc :total inc)
+                          (inc (or (get-in inner-acc [tag :total]) 0))
                           1)
                   answer-count (if has-answer
-                                 (if (contains? inner-acc :answered-tags)
-                                   (-> :answered-tags inner-acc inc) 
+                                 (if (contains? inner-acc tag)
+                                   (inc (or (get-in inner-acc [tag :total]) 0))
                                    1)
-                                 (:answered-tags inner-acc))]
+                                 (get-in inner-acc [tag :answered]))]
               (assoc-in inner-acc [tag]
                         {:total count
                          :answered answer-count})))
           acc tags))
-
-
-(defn- aggregate-stats
-  "Агрегирует статистику, по искомому тегу, возвращая
-  `map` с пересчитанной статистикой.
-
-   Параметры:
-    * `tag` – имя тега, переданного в запросе;
-    * `collected-stats` – общая статистика по всем тегам."
-  [tag collected-stats]
-  (update-in collected-stats [tag :answered]
-             (-> collected-stats
-                 calculate-total-answ
-                 constantly)))
 
 
 (defn- process-tag
@@ -174,9 +146,8 @@
                     data
                     (reduce (fn [acc question]
                               (let [tags (:tags question)
-                                    has-answer (:is_answered question)
-                                    collected-stats (collect-stats acc tags has-answer)]
-                                (aggregate-stats tag collected-stats)))
+                                    has-answer (:is_answered question)]
+                                (aggregate-stats acc tags has-answer)))
                             {} (:items data)))]
     tag-stats))
 
